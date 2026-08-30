@@ -352,6 +352,7 @@ tr:hover td{background:var(--surface-2);}
       <div class="side-tab active" onclick="switchTab('doctor','appts')">📅 المواعيد</div>
       <div class="side-tab" onclick="switchTab('doctor','newappt')">➕ تسجيل موعد</div>
       <div class="side-tab" onclick="switchTab('doctor','patients')">🗂️ سجل المرضى</div>
+      <div class="side-tab" id="doc_handoverTab" style="display:none;" onclick="switchTab('doctor','handover')">🔄 تسليم واستلام</div>
       <div class="side-tab ghost-out" onclick="logout()" style="color:var(--danger);margin-top:10px;">🚪 تسجيل خروج</div>
     </div>
     <div class="dash-main">
@@ -401,7 +402,7 @@ tr:hover td{background:var(--surface-2);}
                   <span>زيارة مجانية (بدون رسم)</span>
                 </div>
               </div>
-              <div class="field full" id="docna_feeWrap"><label>رسم الكشفية (د.ع)</label><input type="number" id="docna_fee" value="15000"></div>
+              <div class="field full" id="docna_feeWrap"><label>رسم الكشفية (د.ع)</label><input type="number" id="docna_fee" value="10000"></div>
               <div class="field full"><label>ملاحظات</label><textarea id="docna_notes"></textarea></div>
             </div>
             <button class="btn btn-primary btn-block" type="submit">حفظ الموعد</button>
@@ -413,6 +414,22 @@ tr:hover td{background:var(--surface-2);}
         <div class="dash-head"><h2>سجل المرضى</h2></div>
         <div class="search-bar"><input type="text" id="doc_patSearch" placeholder="ابحث بالاسم أو رقم الهاتف..." oninput="renderDoctorPatientsDebounced()"></div>
         <div class="panel table-wrap"><table><thead><tr><th>الاسم</th><th>العمر</th><th>جهة اتصال</th><th>الهاتف</th><th></th></tr></thead><tbody id="doc_patBody"></tbody></table></div>
+      </div>
+      <!-- dental handover (تسليم واستلام بين أطباء الأسنان) -->
+      <div class="dash-tabpage" id="doctor-handover">
+        <div class="dash-head"><h2>🔄 تسليم واستلام — أطباء الأسنان</h2></div>
+        <div class="panel">
+          <label>📋 ملاحظات الطبيب السابق</label>
+          <div class="hint" id="doc_handoverMeta" style="margin-bottom:8px;">جارِ التحميل...</div>
+          <div id="doc_handoverPrevNote" style="white-space:pre-wrap;background:var(--bg,#f5f7fa);border:1px solid var(--border,#e2e6ea);border-radius:10px;padding:14px;min-height:60px;margin-bottom:20px;">—</div>
+          <form onsubmit="return saveDentalHandoverNote(event)">
+            <div class="field full">
+              <label>✍️ ملاحظاتك لهذا اليوم (تستبدل الملاحظة السابقة تلقائيًا)</label>
+              <textarea id="doc_handoverInput" rows="6" placeholder="اكتب هنا أي ملاحظات تحب يطّلع عليها الطبيب اللي يجي بعدك..."></textarea>
+            </div>
+            <button class="btn btn-primary btn-block" type="submit">💾 حفظ الملاحظة</button>
+          </form>
+        </div>
       </div>
     </div>
   </div>
@@ -475,7 +492,7 @@ tr:hover td{background:var(--surface-2);}
                   <span>زيارة مجانية (بدون رسم)</span>
                 </div>
               </div>
-              <div class="field full" id="na_feeWrap"><label>رسم الكشفية (د.ع)</label><input type="number" id="na_fee" value="15000"></div>
+              <div class="field full" id="na_feeWrap"><label>رسم الكشفية (د.ع)</label><input type="number" id="na_fee" value="10000"></div>
               <div class="field full"><label>ملاحظات</label><textarea id="na_notes"></textarea></div>
             </div>
             <button class="btn btn-primary btn-block" type="submit">حفظ الموعد</button>
@@ -821,6 +838,7 @@ const sbPublic = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 
 let currentRole = null;   // 'doctor' | 'secretary' | 'lab'
 let currentUserId = null;
+let currentSpecialty = null;
 let currentAccessToken = null;
 let patientsCache = [];
 let appointmentsCache = [];
@@ -936,6 +954,52 @@ function switchTab(role, tab){
   document.getElementById(`${role}-${tab}`).classList.add('active');
   if(role==='secretary' && tab==='labprint') refreshLabPrintList();
   if(role==='owner' && tab==='labs') refreshOwnerLabs();
+  if(role==='doctor' && tab==='handover') loadDentalHandoverNote();
+}
+const DENTAL_HANDOVER_ID = '00000000-0000-0000-0000-000000000001';
+async function loadDentalHandoverNote(){
+  const metaEl = document.getElementById('doc_handoverMeta');
+  const noteEl = document.getElementById('doc_handoverPrevNote');
+  if(!metaEl || !noteEl) return;
+  metaEl.textContent = 'جارِ التحميل...';
+  try{
+    const {data, error} = await sb.from('dental_handover_notes').select('note, updated_at, updated_by, profiles(full_name)').eq('id', DENTAL_HANDOVER_ID).single();
+    if(error) throw error;
+    if(data && data.note){
+      const who = data.profiles?.full_name || 'طبيب';
+      const when = data.updated_at ? new Date(data.updated_at).toLocaleString('ar-IQ', {dateStyle:'medium', timeStyle:'short'}) : '';
+      metaEl.textContent = `آخر تحديث بواسطة ${who} — ${when}`;
+      noteEl.textContent = data.note;
+    }else{
+      metaEl.textContent = 'لا توجد ملاحظات متروكة بعد';
+      noteEl.textContent = '—';
+    }
+  }catch(err){
+    console.error(err);
+    metaEl.textContent = '⚠️ تعذر تحميل الملاحظة';
+    noteEl.textContent = '—';
+  }
+}
+async function saveDentalHandoverNote(e){
+  e.preventDefault();
+  const note = document.getElementById('doc_handoverInput').value.trim();
+  if(!note){ showToast('⚠️ اكتب ملاحظة قبل الحفظ'); return false; }
+  const restore = setFormSaving(e.target, '⏳ جارِ الحفظ...');
+  try{
+    const {error} = await sb.from('dental_handover_notes').update({
+      note, updated_by: currentUserId, updated_at: new Date().toISOString()
+    }).eq('id', DENTAL_HANDOVER_ID);
+    if(error) throw error;
+    showToast('✅ تم حفظ الملاحظة — بتظهر للطبيب اللي بعدك');
+    document.getElementById('doc_handoverInput').value = '';
+    await loadDentalHandoverNote();
+  }catch(err){
+    console.error(err);
+    showToast('⚠️ تعذر حفظ الملاحظة');
+  }finally{
+    restore();
+  }
+  return false;
 }
 function showToast(msg){
   const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
@@ -1063,6 +1127,11 @@ async function loadProfileAndEnter(userId){
   document.getElementById('loginNavBtn').onclick = ()=>showView(currentRole);
   if(document.getElementById('docName')) document.getElementById('docName').textContent = profile.full_name||'';
   if(document.getElementById('docSpecialty')) document.getElementById('docSpecialty').textContent = profile.specialty||'طبيب';
+  currentSpecialty = profile.specialty || '';
+  const isDentist = profile.role==='doctor' && currentSpecialty.includes('أسنان');
+  const handoverTab = document.getElementById('doc_handoverTab');
+  if(handoverTab){ handoverTab.style.display = isDentist ? '' : 'none'; }
+  if(isDentist) loadDentalHandoverNote();
   if(document.getElementById('secName')) document.getElementById('secName').textContent = profile.full_name||'';
   if(document.getElementById('labName')) document.getElementById('labName').textContent = profile.full_name||'';
   if(document.getElementById('ownerName')) document.getElementById('ownerName').textContent = profile.full_name||'';
