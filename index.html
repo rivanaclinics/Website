@@ -799,6 +799,19 @@ tr:hover td{background:var(--surface-2);}
 const SUPABASE_URL = 'https://facwcfxsubqxctmtrslm.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhY3djZnhzdWJxeGN0bXRyc2xtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc2ODAxNDYsImV4cCI6MjEwMzI1NjE0Nn0.GTAEFP6QWKB6lh3VTmgduPl3ylYE9EZIzpRGvJ7DYiw';
 const LAB_BUCKET = 'lab-results'; // Storage bucket خاص (private) لملفات التحاليل — الوصول عبر روابط موقّعة مؤقتة فقط
+/* بعض الأجهزة (خصوصًا آيفون) تضيف رموز اتجاه نص غير مرئية لأسماء الملفات العربية (LRM/RLM/FSI/PDI...)،
+   وسيرفر التخزين يرفض أي مسار يحتوي هذي الرموز بخطأ 400. هذي الدالة تنظّف الاسم قبل رفعه فقط
+   (الاسم المعروض للمستخدم بالواجهة يبقى كما هو، التنظيف يصير فقط على مسار التخزين الداخلي). */
+function safeStorageFileName(name){
+  const dot = name.lastIndexOf('.');
+  const ext = dot>-1 ? name.slice(dot).replace(/[^a-zA-Z0-9.]/g,'').slice(0,10) : '';
+  const base = dot>-1 ? name.slice(0,dot) : name;
+  const cleanBase = base
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g,'') // رموز اتجاه/تحكم غير مرئية
+    .replace(/[^\p{L}\p{N}_-]+/gu,'_') // أي شي ثاني (مسافات، رموز) يتحول لـ _
+    .replace(/_+/g,'_').replace(/^_+|_+$/g,'');
+  return (cleanBase || 'file') + ext;
+}
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // عميل منفصل بدون جلسة، يستخدم فقط لعملية الحجز العام من الصفحة الرئيسية
@@ -2821,7 +2834,7 @@ async function labAttach(e){
       // وأي ملفات إضافية تُحفظ كتحاليل منفصلة مكتملة لنفس المريض (كل ملف بسجل مستقل)
       let firstFilePath = null;
       if(files[0]){
-        const path = `${patientId}/${Date.now()}_${files[0].name}`;
+        const path = `${patientId}/${Date.now()}_${safeStorageFileName(files[0].name)}`;
         const {error:upErr} = await sb.storage.from(LAB_BUCKET).upload(path, files[0]);
         if(upErr) throw upErr;
         firstFilePath = path;
@@ -2832,7 +2845,7 @@ async function labAttach(e){
       const {error} = await sb.from('lab_results').update(updateFields).eq('id', attachToId);
       if(error) throw error;
       for(let i=1;i<files.length;i++){
-        const path = `${patientId}/${Date.now()}_${files[i].name}`;
+        const path = `${patientId}/${Date.now()}_${safeStorageFileName(files[i].name)}`;
         const {error:upErr} = await sb.storage.from(LAB_BUCKET).upload(path, files[i]);
         if(upErr) throw upErr;
         const {error:insErr} = await sb.from('lab_results').insert({
@@ -2845,7 +2858,7 @@ async function labAttach(e){
     }else if(files.length > 1){
       // أكثر من ملف دفعة واحدة: كل ملف يُحفظ كسجل تحليل منفصل ليظهر مستقلًا عند السكرتير
       for(let i=0;i<files.length;i++){
-        const path = `${patientId}/${Date.now()}_${files[i].name}`;
+        const path = `${patientId}/${Date.now()}_${safeStorageFileName(files[i].name)}`;
         const {error:upErr} = await sb.storage.from(LAB_BUCKET).upload(path, files[i]);
         if(upErr) throw upErr;
         const {error} = await sb.from('lab_results').insert({
@@ -2859,7 +2872,7 @@ async function labAttach(e){
     }else{
       let filePath = null;
       if(files[0]){
-        const path = `${patientId}/${Date.now()}_${files[0].name}`;
+        const path = `${patientId}/${Date.now()}_${safeStorageFileName(files[0].name)}`;
         const {error:upErr} = await sb.storage.from(LAB_BUCKET).upload(path, files[0]);
         if(upErr) throw upErr; // قد يكون خطأ شبكة — يُلتقط بالأسفل
         filePath = path; // نخزن المسار الداخلي فقط، لا رابطًا عامًا — الرابط يُولَّد مؤقتًا وقت العرض
