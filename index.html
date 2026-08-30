@@ -848,6 +848,12 @@ function filterBookingDoctors(){
 
 /* ---------------------- عام: التنقل بين الصفحات ---------------------- */
 function showView(id){
+  // لو فيه جلسة مفتوحة بهذا المتصفح وحاول أي شخص يوصل لنموذج تسجيل الدخول (رابط، رجوع للخلف، نافذة جديدة...)
+  // نرجّعه مباشرة للوحة حسابه هو، بدل ما نسمح بفتح نموذج دخول جديد فوق جلسة موجودة بدون تسجيل خروج صريح أولًا.
+  if(id==='login' && currentRole){
+    showToast('⚠️ يوجد حساب مسجّل دخول بالفعل بهذا المتصفح — سجّل الخروج أولًا لتسجيل دخول بحساب آخر');
+    id = currentRole;
+  }
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.getElementById('view-'+id).classList.add('active');
   window.scrollTo(0,0);
@@ -1019,6 +1025,10 @@ async function submitBooking(e){
 /* ---------------------- تسجيل الدخول / الجلسة ---------------------- */
 async function doLogin(e){
   e.preventDefault();
+  if(currentRole){
+    showToast('⚠️ يوجد حساب مسجّل دخول بالفعل — اضغط "تسجيل خروج" أولًا قبل الدخول بحساب آخر');
+    return false;
+  }
   const restore = setFormSaving(e.target, '⏳ جارِ الدخول...');
   try{
     const email=document.getElementById('li_email').value.trim();
