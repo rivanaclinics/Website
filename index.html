@@ -808,7 +808,7 @@ function safeStorageFileName(name){
   const base = dot>-1 ? name.slice(0,dot) : name;
   const cleanBase = base
     .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g,'') // رموز اتجاه/تحكم غير مرئية
-    .replace(/[^\p{L}\p{N}_-]+/gu,'_') // أي شي ثاني (مسافات، رموز) يتحول لـ _
+    .replace(/[^a-zA-Z0-9_-]+/g,'_') // مفاتيح التخزين تقبل إنجليزي/أرقام فقط — أي حرف ثاني (عربي، مسافات، رموز) يتحول لـ _
     .replace(/_+/g,'_').replace(/^_+|_+$/g,'');
   return (cleanBase || 'file') + ext;
 }
