@@ -516,6 +516,9 @@ tr:hover td{background:var(--surface-2);}
         <div class="dash-head"><h2>طباعة نتائج التحاليل</h2><button class="btn btn-outline btn-sm" onclick="refreshLabPrintList()">🔄 تحديث</button></div>
         <div class="search-bar"><input type="text" id="lp_search" placeholder="ابحث باسم المريض..." oninput="renderLabPrintList()"></div>
         <div class="panel table-wrap"><table><thead><tr><th>المريض</th><th>اسم التحليل</th><th>الحالة</th><th>التكلفة الكلية</th><th>الدفع</th><th>التاريخ</th><th>إجراء</th><th>الوصفة</th></tr></thead><tbody id="lp_body"></tbody></table></div>
+        <h3 style="margin:26px 0 6px;color:var(--primary-dark);">🧪 تحاليل مباشرة واردة الآن (مرضى جدد بدون طبيب)</h3>
+        <p class="hint" style="margin:0 0 12px;">تحاليل مرضى جدد يضيفها المختبر مباشرة (بدون طبيب أو سجل مريض). تبقى معروضة هنا لمدة 24 ساعة فقط من وقت إضافتها ثم تُحذف تلقائيًا.</p>
+        <div class="panel" id="sw_log"></div>
       </div>
     </div>
   </div>
@@ -571,9 +574,9 @@ tr:hover td{background:var(--surface-2);}
       <div class="dash-tabpage" id="lab-walkin">
         <div class="dash-head"><h2>تحليل مباشر لمريض جديد</h2></div>
         <p style="margin:-6px 0 16px;font-size:13.5px;">
-          لمريض يأتي مباشرة للمختبر بدون طبيب أو موعد مسبق. يُكتب اسمه هنا فقط للعلم به —
-          <b>لا يُنشأ له سجل مريض ولا يظهر في سجل المرضى أو المواعيد</b>، ويظهر هذا التحليل عند السكرتير
-          ضمن قائمة التحاليل (لتحصيل المبلغ وطباعة النتيجة) فقط.
+          لمريض يأتي مباشرة للمختبر بدون طبيب أو موعد مسبق. <b>لا يُنشأ له سجل مريض ولا يظهر
+          في سجل المرضى أو المواعيد إطلاقًا</b> — يُحفظ بشكل منفصل تمامًا ويظهر عند السكرتير،
+          لكن لمدة 24 ساعة فقط من وقت الإرسال، ثم يُحذف تلقائيًا.
         </p>
         <div class="panel">
           <form onsubmit="return labWalkinSubmit(event)">
@@ -582,12 +585,13 @@ tr:hover td{background:var(--surface-2);}
               <div class="field full"><label>رقم الهاتف (اختياري)</label><input type="tel" id="lw_phone" placeholder="اتركه فارغًا إن لم يتوفر"></div>
               <div class="field full"><label>اسم/اسماء التحاليل</label><textarea id="lw_test" placeholder="مثال:&#10;تحليل دم شامل CBC&#10;تحليل سكر صائم" required></textarea></div>
               <div class="field full"><label>التكلفة الكلية (د.ع) — اختياري</label><input type="number" id="lw_cost" placeholder="اتركه فارغًا إن لم تُحدَّد التكلفة بعد"></div>
-              <div class="field full"><label>ملف/ملفات النتيجة (صورة/PDF) — يمكن اختيار أكثر من ملف لتُحفظ كتحاليل منفصلة</label><input type="file" id="lw_file" accept="image/*,.pdf" multiple></div>
+              <div class="field full"><label>ملف/ملفات النتيجة (صورة/PDF) — اختياري</label><input type="file" id="lw_file" accept="image/*,.pdf" multiple></div>
               <div class="field full"><label>ملاحظات نصية إضافية</label><textarea id="lw_notes"></textarea></div>
             </div>
-            <button class="btn btn-primary btn-block" type="submit">💾 حفظ التحليل</button>
+            <button class="btn btn-primary btn-block" type="submit">💾 حفظ وإرسال للسكرتير</button>
           </form>
         </div>
+        <div id="lw_log"></div>
       </div>
     </div>
   </div>
@@ -873,6 +877,23 @@ let appointmentsCache = [];
 let labResultsCache = [];
 let doctorsCache = [];
 let publicDoctorsCache = [];
+
+/* ---------------------- تحاليل مباشرة (walk-in) — تُحفظ ليوم واحد فقط ----------------------
+   هذه التحاليل (لمريض جديد غير مسجّل، يضيفها المختبر مباشرة بدون طبيب/موعد) تُحفظ بجدول
+   منفصل تمامًا عن سجل المرضى (walkin_lab_tests)، ولمدة 24 ساعة فقط من إنشائها — تُحذف تلقائيًا
+   بعدها (تنظيف يحدث من التطبيق نفسه عند كل تحميل). لا علاقة لها إطلاقًا بجدول patients أو
+   lab_results، فلا تظهر أبدًا في سجل المرضى أو ملف أي مريض. */
+let walkinLabCache = [];
+async function loadWalkinLabTests(){
+  try{
+    const cutoff = new Date(Date.now() - 24*60*60*1000).toISOString();
+    // تنظيف: أي تحليل مباشر أقدم من 24 ساعة يُحذف نهائيًا فور اكتشافه
+    await sb.from('walkin_lab_tests').delete().lt('created_at', cutoff);
+    const {data, error} = await sb.from('walkin_lab_tests').select('*').order('created_at',{ascending:false});
+    if(error) throw error;
+    walkinLabCache = data||[];
+  }catch(err){ console.error('loadWalkinLabTests', err); }
+}
 const SPECIALTIES = [
   {key:'general', label:'طب عام وباطنية', cls:'spec-general', icon:'🩺', match:s=> !!s && s.includes('طب عام')},
   {key:'obgyn',   label:'نسائية',          cls:'spec-obgyn',   icon:'💗', match:s=> !!s && s.includes('نسائية')},
@@ -955,16 +976,17 @@ async function refreshDoctorDash(){
 }
 async function refreshSecretaryDash(){
   if(shouldSkipAutoRefresh()) return;
-  await Promise.all([loadPatients(), loadAppointments(), loadLabResults(), loadDoctors()]);
+  await Promise.all([loadPatients(), loadAppointments(), loadLabResults(), loadDoctors(), loadWalkinLabTests()]);
   renderSecAppts();
   renderSecPatients();
-  if(document.getElementById('secretary-labprint')?.classList.contains('active')) renderLabPrintList();
+  if(document.getElementById('secretary-labprint')?.classList.contains('active')){ renderLabPrintList(); renderSecWalkinLog(); }
 }
 async function refreshLabDash(){
   if(shouldSkipAutoRefresh()) return;
-  await Promise.all([loadPatients(), loadAppointments(), loadLabResults()]);
+  await Promise.all([loadPatients(), loadAppointments(), loadLabResults(), loadWalkinLabTests()]);
   renderLabToday();
   if(document.getElementById('lab-attach')?.classList.contains('active')) renderLabHoldList(true);
+  if(document.getElementById('lab-walkin')?.classList.contains('active')) renderLabWalkinLog();
 }
 async function refreshOwnerDash(){
   if(shouldSkipAutoRefresh()) return;
@@ -1653,11 +1675,7 @@ async function loadDoctors(){
 function doctorLabel(d){ return d.specialty ? `${d.full_name||'طبيب'} — ${d.specialty}` : (d.full_name||'طبيب'); }
 /* اسم المريض لعرضه في قوائم التحاليل: مريض مسجّل (من جدول المرضى)، أو اسم مريض مباشر (walk-in)
    لم يُسجَّل في سجل المرضى إطلاقًا — نميّزه بعلامة 🆕 حتى يُعرف أنه غير مرتبط بسجل مريض */
-function labPatientName(r){
-  if(r.patients?.name) return r.patients.name;
-  if(r.walkin_name) return `${r.walkin_name} 🆕`;
-  return '—';
-}
+function labPatientName(r){ return r.patients?.name || '—'; }
 async function loadLabResults(){
   try{
     const {data, error} = await sb.from('lab_results').select('*, patients(name)').order('created_at',{ascending:false});
@@ -1921,7 +1939,7 @@ function renderOwnerIncome(){
 
 /* ---------------------- لوحة السكرتير ---------------------- */
 async function initSecretaryDash(){
-  await Promise.all([loadPatients(), loadAppointments(), loadLabResults(), loadDoctors()]);
+  await Promise.all([loadPatients(), loadAppointments(), loadLabResults(), loadDoctors(), loadWalkinLabTests()]);
   document.getElementById('sec_apptDate').value = todayStr();
   document.getElementById('sec_doctorFilter').innerHTML = '<option value="">كل الأطباء</option>'+
     doctorsCache.map(d=>`<option value="${d.id}">${escapeHtml(doctorLabel(d))}</option>`).join('');
@@ -1929,6 +1947,7 @@ async function initSecretaryDash(){
   renderSecPatients();
   fillDoctorSelect();
   renderLabPrintList();
+  renderSecWalkinLog();
 }
 function fillDoctorSelect(){
   const sel = document.getElementById('na_doctor');
@@ -2183,7 +2202,7 @@ function renderLabPrintList(){
     const actionHtml = isHold
       ? `<span class="hint">بانتظار المختبر</span>`
       : `<button class="btn btn-primary btn-sm" onclick="viewLabResult('${r.id}')">👁️ عرض</button>`;
-    const rxHtml = r.patient_id ? `<button class="btn btn-outline btn-sm" onclick="printPrescriptionForLabRow('${r.id}')">🖨️ الوصفة</button>` : `<span class="hint">—</span>`;
+    const rxHtml = `<button class="btn btn-outline btn-sm" onclick="printPrescriptionForLabRow('${r.id}')">🖨️ الوصفة</button>`;
     return `<tr><td>${escapeHtml(labPatientName(r))}</td><td>${escapeHtml(r.test_name||'—')}</td>
     <td>${statusHtml}</td><td>${costHtml}</td><td>${paidHtml}</td>
     <td>${new Date(r.created_at).toLocaleDateString('ar-IQ')}</td>
@@ -2236,8 +2255,7 @@ async function viewLabResult(id){
     ? `<p><b>التكلفة الكلية:</b> ${Number(r.cost).toLocaleString()} د.ع — ${r.paid ? '<span style="color:var(--success);">✅ مدفوع</span>' : '<span style="color:var(--danger);">⚠️ غير مدفوع</span>'}</p>`
     : '';
   document.getElementById('labResultBody').innerHTML = `
-    <p><b>اسم المريض:</b> ${escapeHtml(labPatientName(r))}${!r.patient_id && r.walkin_name ? ' <span class="hint">(مريض مباشر — غير مسجّل في سجل المرضى)</span>' : ''}</p>
-    ${!r.patient_id && r.walkin_phone ? `<p><b>هاتف المريض:</b> ${escapeHtml(r.walkin_phone)}</p>` : ''}
+    <p><b>اسم المريض:</b> ${escapeHtml(labPatientName(r))}</p>
     <p><b>اسم التحليل:</b> ${escapeHtml(r.test_name||'—')}</p>
     <p><b>الحالة:</b> ${isHold ? '<span class="badge hold">⏳ قيد العمل</span>' : '<span class="badge done">✅ مكتمل</span>'}</p>
     <p><b>التاريخ:</b> ${new Date(r.created_at).toLocaleDateString('ar-IQ')}</p>
@@ -2560,8 +2578,7 @@ async function buildAndDownloadBackupZip(){
   const labSheet = XLSX.utils.json_to_sheet(labResultsCache.map(l=>({
     id:l.id, patient_id:l.patient_id, appointment_id:l.appointment_id, test_name:l.test_name,
     result_text:l.result_text, file_path:l.file_path, uploaded_by:l.uploaded_by,
-    status:l.status, cost:l.cost, paid:l.paid, created_at:l.created_at,
-    walkin_name:l.walkin_name||null, walkin_phone:l.walkin_phone||null
+    status:l.status, cost:l.cost, paid:l.paid, created_at:l.created_at
   })));
   XLSX.utils.book_append_sheet(wb, labSheet, 'lab_results');
   const xlsxArray = XLSX.write(wb, {type:'array', bookType:'xlsx'});
@@ -2783,10 +2800,11 @@ async function ownerChangeMyPassword(e){
 
 /* ---------------------- لوحة المختبر ---------------------- */
 async function initLabDash(){
-  await Promise.all([loadPatients(), loadAppointments(), loadLabResults()]);
+  await Promise.all([loadPatients(), loadAppointments(), loadLabResults(), loadWalkinLabTests()]);
   document.getElementById('lab_date').value = todayStr();
   renderLabToday();
   fillLabPatientSelect();
+  renderLabWalkinLog();
 }
 function renderLabToday(){
   const date = document.getElementById('lab_date').value || todayStr();
@@ -3034,10 +3052,8 @@ async function labAttach(e){
 }
 
 /* ---------------------- تحليل مباشر لمريض جديد (walk-in) ----------------------
-   لا يوجد patient_id ولا appointment_id هنا إطلاقًا — لا يُنشأ أي سجل مريض جديد،
-   فقط اسم/هاتف حرّان يُحفظان مع سجل التحليل نفسه (عمودا walkin_name / walkin_phone).
-   لذلك هذا التحليل لن يظهر أبدًا ضمن سجل المرضى أو ملف أي مريض — فقط ضمن قوائم
-   التحاليل عند السكرتير والمالك. */
+   يُحفظ في جدول منفصل تمامًا (walkin_lab_tests) لمدة 24 ساعة فقط، ولا علاقة له إطلاقًا
+   بجدول patients أو lab_results — فقط تحاليل مرضى الأطباء الفعليين هي التي تُحفظ هناك. */
 async function labWalkinSubmit(e){
   e.preventDefault();
   const name = document.getElementById('lw_name').value.trim();
@@ -3049,58 +3065,102 @@ async function labWalkinSubmit(e){
   const costRaw = document.getElementById('lw_cost').value;
   const cost = costRaw ? Number(costRaw) : null;
   const files = Array.from(document.getElementById('lw_file').files || []);
-  const restore = setFormSaving(e.target, '⏳ جارِ حفظ التحليل...');
+  const restore = setFormSaving(e.target, '⏳ جارِ الحفظ...');
   try{
-    if(files.length>1){
-      // أكثر من ملف: يُحفظ كل ملف كتحليل مستقل بنفس اسم المريض ورقم هاتفه، والتكلفة تُسجَّل على الأول فقط
-      for(let i=0;i<files.length;i++){
-        const path = `walkin/${Date.now()}_${safeStorageFileName(files[i].name)}`;
-        const {error:upErr} = await sb.storage.from(LAB_BUCKET).upload(path, files[i]);
-        if(upErr) throw upErr;
-        const {error} = await sb.from('lab_results').insert({
-          patient_id: null, appointment_id: null, walkin_name: name, walkin_phone: phone || null,
-          test_name: `${testName} — ${files[i].name}`, result_text: notes,
-          file_path: path, uploaded_by: currentUserId, status:'مكتمل',
-          cost: i===0 ? cost : null, paid:false
-        });
-        if(error) throw error;
-      }
-    }else{
-      let filePath = null;
-      if(files[0]){
-        const path = `walkin/${Date.now()}_${safeStorageFileName(files[0].name)}`;
-        const {error:upErr} = await sb.storage.from(LAB_BUCKET).upload(path, files[0]);
-        if(upErr) throw upErr;
-        filePath = path;
-      }
-      const {error} = await sb.from('lab_results').insert({
-        patient_id: null, appointment_id: null, walkin_name: name, walkin_phone: phone || null,
-        test_name: testName, result_text: notes, file_path: filePath,
-        uploaded_by: currentUserId, status:'مكتمل', cost, paid:false
-      });
-      if(error) throw error;
+    const filePaths = [];
+    for(const f of files){
+      const path = `walkin/${Date.now()}_${safeStorageFileName(f.name)}`;
+      const {error:upErr} = await sb.storage.from(LAB_BUCKET).upload(path, f);
+      if(upErr) throw upErr;
+      filePaths.push({path, name:f.name});
     }
-    showToast(files.length>1 ? `✅ تم حفظ ${files.length} تحاليل بشكل منفصل` : '✅ تم حفظ التحليل — سيظهر عند السكرتير');
+    const {error} = await sb.from('walkin_lab_tests').insert({
+      name, phone: phone||null, test_name: testName, notes: notes||null,
+      cost, file_paths: filePaths, sent_by: currentUserId, paid:false
+    });
+    if(error) throw error;
+    showToast('✅ تم حفظ التحليل — سيظهر عند السكرتير (يبقى محفوظًا 24 ساعة فقط)');
     e.target.reset();
-    await loadLabResults();
+    await loadWalkinLabTests();
+    renderLabWalkinLog();
   }catch(err){
-    if(!isNetworkError(err)){ console.error(err); showToast('⚠️ تعذر حفظ التحليل'); }
-    else{
-      // لا يوجد اتصال: نحفظ بيانات التحليل النصية فقط (بدون ملف) ونؤجل المزامنة
-      await insertLabResultRow({
-        patient_id: null, appointment_id: null, walkin_name: name, walkin_phone: phone || null,
-        test_name: testName, result_text: notes, file_path: null,
-        uploaded_by: currentUserId, status:'مكتمل', cost, paid:false
-      });
-      e.target.reset();
-      showToast(files.length
-        ? '🔌 لا يوجد اتصال — تم حفظ التحليل بدون الملف/الملفات مؤقتًا، أعد رفعها يدويًا بعد رجوع النت'
-        : '🔌 لا يوجد اتصال — سيُزامن التحليل تلقائيًا عند رجوع النت');
-    }
+    console.error(err);
+    showToast('⚠️ تعذر حفظ التحليل — تأكد من الاتصال بالإنترنت');
   }
   finally{ restore(); }
   return false;
 }
+/* عرض التحاليل المباشرة المرسلة خلال آخر 24 ساعة (مرجع للمختبر) */
+function renderLabWalkinLog(){
+  const wrap = document.getElementById('lw_log');
+  if(!wrap) return;
+  if(!walkinLabCache.length){ wrap.innerHTML = ''; return; }
+  wrap.innerHTML = `<h4 style="margin:16px 0 10px;color:var(--primary-dark);">📤 التحاليل المباشرة المرسلة خلال آخر 24 ساعة</h4>` +
+    walkinLabCache.map(w=>{
+      const hasCost = w.cost!==null && w.cost!==undefined;
+      return `<div class="visit-item">
+      <div class="vh"><span>${escapeHtml(w.name)} ${w.phone?`— ${escapeHtml(w.phone)}`:''}</span><span class="hint">${new Date(w.created_at).toLocaleString('ar-IQ')}</span></div>
+      <div style="font-size:13.5px;"><b>التحاليل:</b> ${escapeHtml(w.test_name)}</div>
+      ${hasCost?`<div style="font-size:13.5px;">التكلفة: ${Number(w.cost).toLocaleString()} د.ع ${w.paid?'— ✅ مدفوع':'— ⚠️ غير مدفوع'}</div>`:''}
+    </div>`;}).join('');
+}
+/* عرض التحاليل المباشرة الواردة للسكرتير خلال آخر 24 ساعة */
+function renderSecWalkinLog(){
+  const wrap = document.getElementById('sw_log');
+  if(!wrap) return;
+  if(!walkinLabCache.length){ wrap.innerHTML = emptyState('🧪','لا توجد تحاليل مباشرة خلال آخر 24 ساعة'); return; }
+  wrap.innerHTML = walkinLabCache.map(w=>{
+    const hasCost = w.cost!==null && w.cost!==undefined;
+    const paidHtml = !hasCost ? '' : w.paid
+      ? `<span class="badge done">✅ مدفوع</span>`
+      : `<button class="btn btn-outline btn-sm" style="color:var(--danger);border-color:var(--danger);" onclick="secCollectWalkinPayment('${w.id}')">💰 غير مدفوع</button>`;
+    const filesHtml = (w.file_paths||[]).map((f,fi)=>`<button class="btn btn-outline btn-sm" style="margin-left:6px;" onclick="viewWalkinLabFile('${w.id}',${fi})">👁️ ${escapeHtml(f.name)}</button>`).join('');
+    return `<div class="visit-item">
+      <div class="vh"><span>🆕 ${escapeHtml(w.name)} ${w.phone?`— ${escapeHtml(w.phone)}`:''}</span><span class="hint">${new Date(w.created_at).toLocaleString('ar-IQ')}</span></div>
+      <div style="font-size:13.5px;"><b>التحاليل:</b> ${escapeHtml(w.test_name)}</div>
+      ${w.notes?`<div style="font-size:13.5px;"><b>ملاحظات:</b> ${escapeHtml(w.notes)}</div>`:''}
+      ${hasCost?`<div style="font-size:13.5px;"><b>التكلفة:</b> ${Number(w.cost).toLocaleString()} د.ع</div>`:''}
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        ${filesHtml}${paidHtml}
+        <button class="btn btn-outline btn-sm" style="color:var(--danger);border-color:var(--danger);" onclick="deleteWalkinLabTest('${w.id}')">🗑️ حذف</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function secCollectWalkinPayment(id){
+  try{
+    const {error} = await sb.from('walkin_lab_tests').update({paid:true}).eq('id', id);
+    if(error) throw error;
+    await loadWalkinLabTests();
+    renderSecWalkinLog();
+    showToast('✅ تم تسجيل استلام المبلغ');
+  }catch(err){ console.error(err); showToast('⚠️ تعذر تحديث حالة الدفع — تأكد من الاتصال بالإنترنت'); }
+}
+async function deleteWalkinLabTest(id){
+  const ok = await askConfirm('هل تريد حذف هذا التحليل المباشر نهائيًا؟', {title:'🗑️ حذف تحليل مباشر', okText:'حذف', danger:true});
+  if(!ok) return;
+  try{
+    const row = walkinLabCache.find(w=>w.id===id);
+    if(row?.file_paths?.length){
+      try{ await sb.storage.from(LAB_BUCKET).remove(row.file_paths.map(f=>f.path)); }
+      catch(fileErr){ console.error('تعذر حذف ملف التحليل المباشر من التخزين', fileErr); }
+    }
+    const {error} = await sb.from('walkin_lab_tests').delete().eq('id', id);
+    if(error) throw error;
+    await loadWalkinLabTests();
+    renderSecWalkinLog(); renderLabWalkinLog();
+    showToast('✅ تم الحذف');
+  }catch(err){ console.error(err); showToast('⚠️ تعذر الحذف — تأكد من الاتصال بالإنترنت'); }
+}
+async function viewWalkinLabFile(id, fileIdx){
+  const w = walkinLabCache.find(x=>x.id===id);
+  const f = w?.file_paths?.[fileIdx];
+  if(!f){ showToast('⚠️ تعذر إيجاد الملف'); return; }
+  const url = await getSignedLabUrl(f.path, 300);
+  if(!url){ showToast('⚠️ تعذر تجهيز رابط الملف'); return; }
+  window.open(url, '_blank');
+}
+
 
 /* ---------------------- ملف المريض (نافذة مشتركة) ---------------------- */
 async function openPatientProfile(patientId){
