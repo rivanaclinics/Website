@@ -390,7 +390,10 @@ tr:hover td{background:var(--surface-2);}
                   <div class="field"><label>اسم المريض</label><input type="text" id="docna_name"></div>
                   <div class="field"><label>جهة اتصال (اختياري)</label><input type="text" id="docna_guardian"></div>
                   <div class="field"><label>الهاتف</label><input type="tel" id="docna_phone"></div>
-                  <div class="field"><label>تاريخ الميلاد</label><input type="date" id="docna_dob"></div>
+                  <div class="field">
+                    <label>العمر (سنوات)</label>
+                    <input type="number" id="docna_ageYears" placeholder="مثال: 5" min="0">
+                  </div>
                 </div>
               </div>
               <div class="field full"><label>الطبيب المختص</label><select id="docna_doctor" required disabled></select><div class="hint">لا يمكنك تسجيل موعد لطبيب آخر — يُحفظ الموعد باسمك تلقائيًا</div></div>
@@ -480,7 +483,10 @@ tr:hover td{background:var(--surface-2);}
                   <div class="field"><label>اسم المريض</label><input type="text" id="na_name"></div>
                   <div class="field"><label>جهة اتصال (اختياري)</label><input type="text" id="na_guardian"></div>
                   <div class="field"><label>الهاتف</label><input type="tel" id="na_phone"></div>
-                  <div class="field"><label>تاريخ الميلاد</label><input type="date" id="na_dob"></div>
+                  <div class="field">
+                    <label>العمر (سنوات)</label>
+                    <input type="number" id="na_ageYears" placeholder="مثال: 5" min="0">
+                  </div>
                 </div>
               </div>
               <div class="field full"><label>الطبيب المختص</label><select id="na_doctor" required></select></div>
@@ -522,6 +528,7 @@ tr:hover td{background:var(--surface-2);}
       <div class="who"><div class="name" id="labName">—</div><div class="role">فني مختبر</div></div>
       <div class="side-tab active" onclick="switchTab('lab','today')">🗓️ مرضى اليوم</div>
       <div class="side-tab" onclick="switchTab('lab','attach')">📎 إرفاق تحليل</div>
+      <div class="side-tab" onclick="switchTab('lab','walkin')">🧪 تحليل مباشر (مريض جديد)</div>
       <div class="side-tab ghost-out" onclick="logout()" style="color:var(--danger);margin-top:10px;">🚪 تسجيل خروج</div>
     </div>
     <div class="dash-main">
@@ -558,6 +565,27 @@ tr:hover td{background:var(--surface-2);}
               <button class="btn btn-outline btn-block" type="button" onclick="startLabInProgress()">🔄 جاري العمل (تسجيل بدون رفع ملف الآن)</button>
               <button class="btn btn-primary btn-block" type="submit">💾 حفظ التحليل (وإرفاق الملف إن وُجد)</button>
             </div>
+          </form>
+        </div>
+      </div>
+      <div class="dash-tabpage" id="lab-walkin">
+        <div class="dash-head"><h2>تحليل مباشر لمريض جديد</h2></div>
+        <p style="margin:-6px 0 16px;font-size:13.5px;">
+          لمريض يأتي مباشرة للمختبر بدون طبيب أو موعد مسبق. يُكتب اسمه هنا فقط للعلم به —
+          <b>لا يُنشأ له سجل مريض ولا يظهر في سجل المرضى أو المواعيد</b>، ويظهر هذا التحليل عند السكرتير
+          ضمن قائمة التحاليل (لتحصيل المبلغ وطباعة النتيجة) فقط.
+        </p>
+        <div class="panel">
+          <form onsubmit="return labWalkinSubmit(event)">
+            <div class="form-grid">
+              <div class="field full"><label>اسم المريض</label><input type="text" id="lw_name" placeholder="اسم المريض" required></div>
+              <div class="field full"><label>رقم الهاتف (اختياري)</label><input type="tel" id="lw_phone" placeholder="اتركه فارغًا إن لم يتوفر"></div>
+              <div class="field full"><label>اسم/اسماء التحاليل</label><textarea id="lw_test" placeholder="مثال:&#10;تحليل دم شامل CBC&#10;تحليل سكر صائم" required></textarea></div>
+              <div class="field full"><label>التكلفة الكلية (د.ع) — اختياري</label><input type="number" id="lw_cost" placeholder="اتركه فارغًا إن لم تُحدَّد التكلفة بعد"></div>
+              <div class="field full"><label>ملف/ملفات النتيجة (صورة/PDF) — يمكن اختيار أكثر من ملف لتُحفظ كتحاليل منفصلة</label><input type="file" id="lw_file" accept="image/*,.pdf" multiple></div>
+              <div class="field full"><label>ملاحظات نصية إضافية</label><textarea id="lw_notes"></textarea></div>
+            </div>
+            <button class="btn btn-primary btn-block" type="submit">💾 حفظ التحليل</button>
           </form>
         </div>
       </div>
@@ -1014,6 +1042,16 @@ function calcAge(dob){
   if(months<0){years--;months+=12;}
   return years>0 ? `${years} سنة ${months} شهر` : `${months} شهر`;
 }
+/* تحويل عمر (سنوات فقط) أدخله المستخدم إلى تاريخ ميلاد تقريبي يُحفظ بعمود dob،
+   لأن كل الشاشات الأخرى (سجل المرضى، البحث، ملف المريض...) تعتمد على calcAge(dob) لعرض العمر */
+function ageToDob(years){
+  years = years ? parseInt(years,10)||0 : 0;
+  if(!years) return null;
+  const d = new Date();
+  d.setDate(1); // تفادي مشاكل تجاوز عدد أيام الشهر
+  d.setFullYear(d.getFullYear() - years);
+  return d.toISOString().slice(0,10);
+}
 function anyModalOpen(){ return !!document.querySelector('.modal-overlay.show'); }
 function openModal(id){ document.getElementById(id).classList.add('show'); }
 function closeModal(id){ document.getElementById(id).classList.remove('show'); }
@@ -1238,7 +1276,7 @@ function removeLocalAppointment(id){
 }
 function upsertLocalLabResult(id, row){
   const idx = labResultsCache.findIndex(l=>l.id===id);
-  const patient = patientsCache.find(p=>p.id===row.patient_id);
+  const patient = row.patient_id ? patientsCache.find(p=>p.id===row.patient_id) : null;
   const merged = {...row, id, patients: patient?{name:patient.name}:null, created_at:new Date().toISOString(), _pendingSync:true};
   if(idx>=0) labResultsCache[idx] = merged; else labResultsCache.unshift(merged);
 }
@@ -1613,6 +1651,13 @@ async function loadDoctors(){
   }
 }
 function doctorLabel(d){ return d.specialty ? `${d.full_name||'طبيب'} — ${d.specialty}` : (d.full_name||'طبيب'); }
+/* اسم المريض لعرضه في قوائم التحاليل: مريض مسجّل (من جدول المرضى)، أو اسم مريض مباشر (walk-in)
+   لم يُسجَّل في سجل المرضى إطلاقًا — نميّزه بعلامة 🆕 حتى يُعرف أنه غير مرتبط بسجل مريض */
+function labPatientName(r){
+  if(r.patients?.name) return r.patients.name;
+  if(r.walkin_name) return `${r.walkin_name} 🆕`;
+  return '—';
+}
 async function loadLabResults(){
   try{
     const {data, error} = await sb.from('lab_results').select('*, patients(name)').order('created_at',{ascending:false});
@@ -1827,7 +1872,7 @@ function renderOwnerIncome(){
     ...labsList.map(l=>{
       const appt = l.appointment_id ? appointmentsCache.find(a=>a.id===l.appointment_id) : null;
       return {
-        date: String(l.created_at).slice(0,10), type:'🧪 تحليل مخبري', patient:l.patients?.name||'—',
+        date: String(l.created_at).slice(0,10), type:'🧪 تحليل مخبري', patient:labPatientName(l),
         doctor: appt?.doctor?.full_name || '—', item: l.test_name||'تحليل مخبري', amount: Number(l.cost||0),
         isFree:false, isLab:true
       };
@@ -1998,7 +2043,7 @@ async function secCreateAppt(e){
       const name=document.getElementById('na_name').value.trim();
       const guardian=document.getElementById('na_guardian').value.trim();
       const phone=document.getElementById('na_phone').value.trim();
-      const dob=document.getElementById('na_dob').value;
+      const dob=ageToDob(document.getElementById('na_ageYears').value);
       if(!name){ showToast('⚠️ اختر مريضًا من نتائج البحث أو أدخل اسم مريض جديد'); return false; }
       patientId = await upsertPatientRow({name, guardian_name:guardian, phone, dob}, null);
     }
@@ -2078,7 +2123,7 @@ async function docCreateAppt(e){
       const name=document.getElementById('docna_name').value.trim();
       const guardian=document.getElementById('docna_guardian').value.trim();
       const phone=document.getElementById('docna_phone').value.trim();
-      const dob=document.getElementById('docna_dob').value;
+      const dob=ageToDob(document.getElementById('docna_ageYears').value);
       if(!name){ showToast('⚠️ اختر مريضًا من نتائج البحث أو أدخل اسم مريض جديد'); return false; }
       patientId = await upsertPatientRow({name, guardian_name:guardian, phone, dob}, null);
     }
@@ -2126,7 +2171,7 @@ async function refreshLabPrintList(){
 }
 function renderLabPrintList(){
   const q = (document.getElementById('lp_search').value||'').trim().toLowerCase();
-  const list = labResultsCache.filter(r=>!q || r.patients?.name?.toLowerCase().includes(q));
+  const list = labResultsCache.filter(r=>!q || labPatientName(r).toLowerCase().includes(q));
   document.getElementById('lp_body').innerHTML = list.length ? list.map(r=>{
     const isHold = r.status==='قيد العمل';
     const statusHtml = isHold ? `<span class="badge hold">⏳ قيد العمل</span>` : `<span class="badge done">✅ مكتمل</span>`;
@@ -2138,8 +2183,8 @@ function renderLabPrintList(){
     const actionHtml = isHold
       ? `<span class="hint">بانتظار المختبر</span>`
       : `<button class="btn btn-primary btn-sm" onclick="viewLabResult('${r.id}')">👁️ عرض</button>`;
-    const rxHtml = `<button class="btn btn-outline btn-sm" onclick="printPrescriptionForLabRow('${r.id}')">🖨️ الوصفة</button>`;
-    return `<tr><td>${escapeHtml(r.patients?.name||'—')}</td><td>${escapeHtml(r.test_name||'—')}</td>
+    const rxHtml = r.patient_id ? `<button class="btn btn-outline btn-sm" onclick="printPrescriptionForLabRow('${r.id}')">🖨️ الوصفة</button>` : `<span class="hint">—</span>`;
+    return `<tr><td>${escapeHtml(labPatientName(r))}</td><td>${escapeHtml(r.test_name||'—')}</td>
     <td>${statusHtml}</td><td>${costHtml}</td><td>${paidHtml}</td>
     <td>${new Date(r.created_at).toLocaleDateString('ar-IQ')}</td>
     <td>${actionHtml}</td><td>${rxHtml}</td></tr>`;
@@ -2191,7 +2236,8 @@ async function viewLabResult(id){
     ? `<p><b>التكلفة الكلية:</b> ${Number(r.cost).toLocaleString()} د.ع — ${r.paid ? '<span style="color:var(--success);">✅ مدفوع</span>' : '<span style="color:var(--danger);">⚠️ غير مدفوع</span>'}</p>`
     : '';
   document.getElementById('labResultBody').innerHTML = `
-    <p><b>اسم المريض:</b> ${escapeHtml(r.patients?.name||'—')}</p>
+    <p><b>اسم المريض:</b> ${escapeHtml(labPatientName(r))}${!r.patient_id && r.walkin_name ? ' <span class="hint">(مريض مباشر — غير مسجّل في سجل المرضى)</span>' : ''}</p>
+    ${!r.patient_id && r.walkin_phone ? `<p><b>هاتف المريض:</b> ${escapeHtml(r.walkin_phone)}</p>` : ''}
     <p><b>اسم التحليل:</b> ${escapeHtml(r.test_name||'—')}</p>
     <p><b>الحالة:</b> ${isHold ? '<span class="badge hold">⏳ قيد العمل</span>' : '<span class="badge done">✅ مكتمل</span>'}</p>
     <p><b>التاريخ:</b> ${new Date(r.created_at).toLocaleDateString('ar-IQ')}</p>
@@ -2446,7 +2492,7 @@ function renderOwnerLabs(){
   if(!body) return;
   const q = (document.getElementById('ow_lab_search')?.value||'').trim().toLowerCase();
   const list = labResultsCache.filter(r=> !q
-    || (r.patients?.name||'').toLowerCase().includes(q)
+    || labPatientName(r).toLowerCase().includes(q)
     || (r.test_name||'').toLowerCase().includes(q));
   body.innerHTML = list.length ? list.map(r=>{
     const isHold = r.status==='قيد العمل';
@@ -2455,7 +2501,7 @@ function renderOwnerLabs(){
     const costHtml = hasCost ? `${Number(r.cost).toLocaleString()} د.ع` : '—';
     const paidHtml = !hasCost ? `<span class="hint">—</span>`
       : (r.paid ? `<span class="badge done">✅ مدفوع</span>` : `<span class="badge hold">⚠️ غير مدفوع</span>`);
-    return `<tr><td>${escapeHtml(r.patients?.name||'—')}</td><td>${escapeHtml(r.test_name||'—')}</td>
+    return `<tr><td>${escapeHtml(labPatientName(r))}</td><td>${escapeHtml(r.test_name||'—')}</td>
     <td>${statusHtml}</td><td>${costHtml}</td><td>${paidHtml}</td>
     <td>${new Date(r.created_at).toLocaleDateString('ar-IQ')}</td>
     <td class="row-actions">
@@ -2467,7 +2513,7 @@ function renderOwnerLabs(){
 }
 async function ownerDeleteLabResult(id){
   const r = labResultsCache.find(x=>x.id===id);
-  const label = r ? `${r.test_name||'تحليل'} — ${r.patients?.name||'مريض غير معروف'}` : 'هذا التحليل';
+  const label = r ? `${r.test_name||'تحليل'} — ${labPatientName(r)}` : 'هذا التحليل';
   const ok = await askConfirm(
     `هل أنت متأكد من حذف "${label}" نهائيًا؟\n\nسيُحذف سجل التحليل وملفه المرفق (إن وُجد) نهائيًا. هذا الإجراء لا يمكن التراجع عنه.`,
     {title:'🗑️ حذف التحليل', okText:'حذف نهائيًا', danger:true}
@@ -2514,7 +2560,8 @@ async function buildAndDownloadBackupZip(){
   const labSheet = XLSX.utils.json_to_sheet(labResultsCache.map(l=>({
     id:l.id, patient_id:l.patient_id, appointment_id:l.appointment_id, test_name:l.test_name,
     result_text:l.result_text, file_path:l.file_path, uploaded_by:l.uploaded_by,
-    status:l.status, cost:l.cost, paid:l.paid, created_at:l.created_at
+    status:l.status, cost:l.cost, paid:l.paid, created_at:l.created_at,
+    walkin_name:l.walkin_name||null, walkin_phone:l.walkin_phone||null
   })));
   XLSX.utils.book_append_sheet(wb, labSheet, 'lab_results');
   const xlsxArray = XLSX.write(wb, {type:'array', bookType:'xlsx'});
@@ -2626,7 +2673,7 @@ async function restoreBackup(){
           try{
             const blob = await zip.files[matchName].async('blob');
             const originalName = matchName.split('__').slice(1).join('__') || 'file';
-            const path = `${row.patient_id}/${Date.now()}_${originalName}`;
+            const path = `${row.patient_id || 'walkin'}/${Date.now()}_${originalName}`;
             const {error:upErr} = await sb.storage.from(LAB_BUCKET).upload(path, blob, {upsert:true});
             if(upErr) throw upErr;
             row.file_path = path;
@@ -2977,6 +3024,75 @@ async function labAttach(e){
       document.getElementById('la_searchResults').style.display='none';
       document.getElementById('la_searchResults').innerHTML='';
       fillLabAppointmentSelect();
+      showToast(files.length
+        ? '🔌 لا يوجد اتصال — تم حفظ التحليل بدون الملف/الملفات مؤقتًا، أعد رفعها يدويًا بعد رجوع النت'
+        : '🔌 لا يوجد اتصال — سيُزامن التحليل تلقائيًا عند رجوع النت');
+    }
+  }
+  finally{ restore(); }
+  return false;
+}
+
+/* ---------------------- تحليل مباشر لمريض جديد (walk-in) ----------------------
+   لا يوجد patient_id ولا appointment_id هنا إطلاقًا — لا يُنشأ أي سجل مريض جديد،
+   فقط اسم/هاتف حرّان يُحفظان مع سجل التحليل نفسه (عمودا walkin_name / walkin_phone).
+   لذلك هذا التحليل لن يظهر أبدًا ضمن سجل المرضى أو ملف أي مريض — فقط ضمن قوائم
+   التحاليل عند السكرتير والمالك. */
+async function labWalkinSubmit(e){
+  e.preventDefault();
+  const name = document.getElementById('lw_name').value.trim();
+  if(!name){ showToast('⚠️ اكتب اسم المريض أولًا'); return false; }
+  const phone = document.getElementById('lw_phone').value.trim();
+  const testName = document.getElementById('lw_test').value.trim();
+  if(!testName){ showToast('⚠️ اكتب اسم أو اسماء التحاليل أولًا'); return false; }
+  const notes = document.getElementById('lw_notes').value.trim();
+  const costRaw = document.getElementById('lw_cost').value;
+  const cost = costRaw ? Number(costRaw) : null;
+  const files = Array.from(document.getElementById('lw_file').files || []);
+  const restore = setFormSaving(e.target, '⏳ جارِ حفظ التحليل...');
+  try{
+    if(files.length>1){
+      // أكثر من ملف: يُحفظ كل ملف كتحليل مستقل بنفس اسم المريض ورقم هاتفه، والتكلفة تُسجَّل على الأول فقط
+      for(let i=0;i<files.length;i++){
+        const path = `walkin/${Date.now()}_${safeStorageFileName(files[i].name)}`;
+        const {error:upErr} = await sb.storage.from(LAB_BUCKET).upload(path, files[i]);
+        if(upErr) throw upErr;
+        const {error} = await sb.from('lab_results').insert({
+          patient_id: null, appointment_id: null, walkin_name: name, walkin_phone: phone || null,
+          test_name: `${testName} — ${files[i].name}`, result_text: notes,
+          file_path: path, uploaded_by: currentUserId, status:'مكتمل',
+          cost: i===0 ? cost : null, paid:false
+        });
+        if(error) throw error;
+      }
+    }else{
+      let filePath = null;
+      if(files[0]){
+        const path = `walkin/${Date.now()}_${safeStorageFileName(files[0].name)}`;
+        const {error:upErr} = await sb.storage.from(LAB_BUCKET).upload(path, files[0]);
+        if(upErr) throw upErr;
+        filePath = path;
+      }
+      const {error} = await sb.from('lab_results').insert({
+        patient_id: null, appointment_id: null, walkin_name: name, walkin_phone: phone || null,
+        test_name: testName, result_text: notes, file_path: filePath,
+        uploaded_by: currentUserId, status:'مكتمل', cost, paid:false
+      });
+      if(error) throw error;
+    }
+    showToast(files.length>1 ? `✅ تم حفظ ${files.length} تحاليل بشكل منفصل` : '✅ تم حفظ التحليل — سيظهر عند السكرتير');
+    e.target.reset();
+    await loadLabResults();
+  }catch(err){
+    if(!isNetworkError(err)){ console.error(err); showToast('⚠️ تعذر حفظ التحليل'); }
+    else{
+      // لا يوجد اتصال: نحفظ بيانات التحليل النصية فقط (بدون ملف) ونؤجل المزامنة
+      await insertLabResultRow({
+        patient_id: null, appointment_id: null, walkin_name: name, walkin_phone: phone || null,
+        test_name: testName, result_text: notes, file_path: null,
+        uploaded_by: currentUserId, status:'مكتمل', cost, paid:false
+      });
+      e.target.reset();
       showToast(files.length
         ? '🔌 لا يوجد اتصال — تم حفظ التحليل بدون الملف/الملفات مؤقتًا، أعد رفعها يدويًا بعد رجوع النت'
         : '🔌 لا يوجد اتصال — سيُزامن التحليل تلقائيًا عند رجوع النت');
